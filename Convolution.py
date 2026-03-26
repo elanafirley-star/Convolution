@@ -51,20 +51,30 @@ class Convolution():
                     x_end = x_start + kernelsize
 
                     #on en fait une matrice à part entière
-                    fenetre = image_ajout_pads[y_start:y_end, x_start, x_end]
+                    fenetre = image_ajout_pads[y_start:y_end, x_start : x_end]
                     sortie[f, y, x] += np.sum(fenetre * filtres[f])
 
         return sortie
 
 
 
-    def activation(self,image,type_fonction = "ReLu"):
+    def activation(self,image,type_fonction):
         """
         Applique une transformation sur l'image (nettoyer l'image en ne gardant que les signes positifs forts)
+        :param image: l'image de sortie suite à la convolution
         :param type_fonction: ReLu ou Soft max
         :return: image de même taille avec les valeurs transformées
         """
-        pass
+
+        if type_fonction == "ReLu":
+            return np.maximum(0, image) #ompare chq élémént d'image avec 0
+
+        elif type_fonction == "Softmax":
+            exp_img = np.exp(image - np.max(image))  #On calcule l'exp de chq point on soustr le max pour éviter des nombres trop grands
+            return exp_img / np.sum(exp_img)
+
+        return image
+
 
 
     def pooling(self,stride,pool_size,image,type_pooling):
