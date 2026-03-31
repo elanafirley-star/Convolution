@@ -1,4 +1,65 @@
 import numpy as np
+import kagglehub
+import os
+import cv2
+
+# 1. Téléchargement
+path_brut = kagglehub.dataset_download("alessiocorrado99/animals10")
+
+# 2. Correction du chemin (Le dataset Kaggle contient un sous-dossier 'raw-img')
+path_final = os.path.join(path_brut, "raw-img")
+
+
+# Note : Si le print de classes affiche une liste vide après,
+# vérifie si le dossier s'appelle bien 'raw-img' ou s'il n'y en a pas.
+
+def charger_animaux(path, taille=(64, 64), max_images_par_classe=50):
+    images = []
+    labels = []
+
+    if not os.path.exists(path):
+        print(f"Erreur : Le chemin {path} n'existe pas.")
+        return None, None, []
+
+    # On liste les dossiers (un dossier = une classe d'animal)
+    classes = sorted([d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))])
+
+    for idx, nom_classe in enumerate(classes):
+        dossier_classe = os.path.join(path, nom_classe)
+
+        print(f"Chargement de {nom_classe} (Classe {idx})...")
+        compteur = 0
+
+        # On liste les fichiers images
+        for fichier in os.listdir(dossier_classe):
+            if compteur >= max_images_par_classe:
+                break
+
+            chemin_img = os.path.join(dossier_classe, fichier)
+
+            # Lecture
+            img = cv2.imread(chemin_img, cv2.IMREAD_GRAYSCALE)
+
+            if img is not None:
+                # Redimensionnement (Obligatoire pour le CNN)
+                img = cv2.resize(img, taille)
+
+                # Conversion en float32 pour éviter les erreurs de calcul plus tard
+                images.append(img.astype(np.float32))
+                labels.append(idx)
+                compteur += 1
+
+    return np.array(images), np.array(labels), classes
+
+
+# --- TEST DU CHARGEMENT ---
+images, labels, noms_classes = charger_animaux(path_final, taille=(64, 64), max_images_par_classe=20)
+
+if images is not None:
+    print(f"\nChargement terminé !")
+    print(f"Nombre total d'images : {len(images)}")
+    print(f"Format d'une image : {images[0].shape}")
+    print(f"Classes trouvées : {noms_classes}")
 
 class Convolution():
     def __init__(self, nb_filtres, pas, padding, nb_convolution, kernelsize, pool_size, nb_pooling, image_shape, nb_classes, couches_denses):
@@ -98,7 +159,7 @@ class Convolution():
                     x_end = x_start + kernelsize
 
                     #on en fait une matrice à part entière
-                    fenetre = image_ajout_pads[y_start:y_end, x_start : x_end]
+                    fenetre = image_ajout_pads[:, y_start:y_end, x_start : x_end]
                     sortie[f, y, x] += np.sum(fenetre * filtre_actuel)
 
         return sortie
