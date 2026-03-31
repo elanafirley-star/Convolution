@@ -11,18 +11,23 @@ class Convolution():
         self.nb_couches_pooling = nb_pooling
         self.image = image
         self.pool_size = pool_size
+
+        self.filtres = np.random.randn(nb_filtres, kernelsize, kernelsize) #paquet de filtres aléatoires pour eviter que le réseau oublie ce qu'il apprend à chq fois
         pass
 
-    def convolution(self, padding, stride, nb_couches, nb_filtres, kernelsize, image, biais):
+    def convolution(self, padding, stride, nb_filtres, kernelsize, image, biais):
         """
                 Applique un filtre sur l'image
                 :param padding: nb de pixels ajoutés sur le bord de l'image (soit 0 ou copie du pixel voisin)
                 :param stride: de combien on décale
-                :param nb_couches: nb couches de convolution
                 :param nb_filtres:
                 :param kernelsize: taille du noyau
                 :return: un nouvelle image de taille réduite ou non
                 """
+
+        #géstion de l'image d'entree: 2d : (H, L) vs 3d : (C, H, L)
+        if image.ndim == 3:
+            image = image[0]  # prendre 1er canal si c'est du 3d
 
         # on ajoute les cases autour de l'image
         if padding > 0:
@@ -37,11 +42,14 @@ class Convolution():
         sortie_h = (image_h - kernelsize) // stride + 1
         sortie_l = (image_l - kernelsize) // stride + 1
 
-        filtres = np.random.randn(nb_filtres, kernelsize, kernelsize)
         # on initialise la matrice de sortie avec les biais
-        sortie = np.full((sortie_h, sortie_l), biais)
+        # sortie = np.full((sortie_h, sortie_l), biais)
+        #la boucle tourne sur nb_filtres donc la matrice de sortie doit avoir 3 dim
+        sortie = np.full((nb_filtres, sortie_h, sortie_l), biais) #je me suis permis de corriger car j'en avais besoin pour la forward
 
         for f in range(nb_filtres):
+            filtre_actuel = self.filtres[f]
+
             for y in range(sortie_h):
                 for x in range(sortie_l):
                     #on délimite la zone qu'on va regarder
@@ -52,7 +60,7 @@ class Convolution():
 
                     #on en fait une matrice à part entière
                     fenetre = image_ajout_pads[y_start:y_end, x_start : x_end]
-                    sortie[f, y, x] += np.sum(fenetre * filtres[f])
+                    sortie[f, y, x] += np.sum(fenetre * filtre_actuel)
 
         return sortie
 
@@ -91,31 +99,55 @@ class Convolution():
         if img.ndim == 2:  # noir/blanc
             h_in, l_in = img.shape
             nb_canal = 1  #une info à recup : intensité de noir
-            img = img[:, :, np.newaxis]
+            img = img[np.newaxis,:, :]
         else: #3d/couleur ou après convolution
-            h_in, l_in, nb_canal = img.shape
+            nb_canal, h_in, l_in= img.shape
 
         h_out = (h_in - pool_size) // stride + 1
         l_out = (l_in - pool_size) // stride + 1
 
-        sortie = np.zeros((h_out, l_out, nb_canal))
+        sortie = np.zeros((nb_canal, h_out, l_out))
 
         for canal in range(nb_canal):
             for i in range(h_out):
                 for j in range(l_out):
                     y_0 = i * stride
                     x_0 = j * stride
-                    fenetre = img[y_0 : y_0+pool_size, x_0 : x_0+pool_size, canal] #sliing
+                    fenetre = img[canal, y_0 : y_0 + pool_size, x_0 : x_0 + pool_size] #sliing
                     # y_0: y_0+taille: On prend toutes lignes entre point de départ et la hauteur de l'image
                     # x_0 : x_0+taille : idem pour les colonnes
                     # on reste sur le canal actuel
 
-                if type_pooling == "Max":
-                    sortie[i, j, canal] = np.max(fenetre)
-                else:  #average
-                    sortie[i, j, canal] = np.mean(fenetre)
+                    if type_pooling == "Max":
+                        sortie[canal, i, j] = np.max(fenetre)
+                    else:  #average
+                        sortie[canal, i, j] = np.mean(fenetre)
 
         return sortie.squeeze() if nb_canal == 1 else sortie
+
+
+
+    def forward(self, image_entree, biais):
+        """ Réalise la passe en avant (Forward Pass). Image traverse  la convolution, l'activation ReLU
+        et enfin le pooling pour extraire les caractéristiques reconues pas le CNN.
+
+    params:
+        image_entree (np.array): Matrice 2D (H, L) représentant l'image brute.
+        biais (float): Valeur ajoutée après la convolution pour décaler l'activation.
+
+    Returns:
+        np.array: L'image / feature map transformée et réduite
+    """
+        # convolution
+        conv_out = self.convolution(padding=self.type_padding, stride=self.pas, nb_filtres=self.nb_filtres,kernelsize=self.taille_noyau,image=image_entree,biais=biais)
+
+        #activation (ReLU pour les couches caches)
+        activation_out = self.activation(conv_out, type_fonction="ReLu")
+
+        # pooling
+        pooling_out = self.pooling(stride=self.pas,pool_size=self.pool_size,image=activation_out,type_pooling="Max")
+
+        return pooling_out
 
 def main():
     """
