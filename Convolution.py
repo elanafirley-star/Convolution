@@ -151,6 +151,7 @@ class Convolution():
 
 
     def forward(self, image_entree, biais):  #x est une var temporaire, représente l'état de doonés à chq etape de transformation
+        self.cache = {} #dictionnaire pour stocker les étapes
         #boucle
         x = np.array(image_entree) #im brute
         if x.ndim == 2: x = x[np.newaxis, :, :]
@@ -160,33 +161,69 @@ class Convolution():
             x = self.activation(x, type_fonction="ReLu") #x est nettoyé (les négatifs deviennent 0)
             x = self.pooling(self.pas, self.pool_size, x, type_pooling="Max") #x est réduit
 
+        self.cache['avant_flatten'] = x
         #applatissement
-        x = x.flatten() #apres la boucle, notre image est ransformée en vecteur
-
+        x_flat = x.flatten() #apres la boucle, notre image est ransformée en vecteur
+        self.cache['activation_dense'] = [x_flat] #on stocke l'entrée du block dense
+        x = x.flat
+        self.cache['z_dense'] = [] # z= W*x + b
         for W, b in self.poids_dense:
             x = np.dot(x, W) + b #x devient un vecteur de "scores"
+            self.cache['z_dense'].append(x) #on stocke le score avant activation
             x = self.activation(x, type_fonction="ReLu")  # Activation entre chaque couche
+            self.cache['activations_dense'].append(x) #on stocke le score activé
 
         #couche de sortie
         score_final = np.dot(x, self.W_final) + self.b_final #x est un veteur de la taille de nos classes (ex si on a dix animaux), il represente maintenant une proba que l'image apartienne à une catégorie
+        self.cache['z_final'] = score_final
         return self.activation(score_final, type_fonction="Softmax")
 
+    def backward_dense(self,erreur,flatten,poids,biais,lr):
+        #calcul du gradient par rapport aux poids (np.outer : calcule le produit de 2 vecteurs)
+        erreur_poids = np.outer(flatten,erreur)
 
+        #calcul du gradient par rapport aux biais
+        erreur_biais = erreur
 
+        #calcul du gradient
+        gradient = np.dot(erreur,poids.T)
+        nv_poids = poids - lr*erreur_poids
+        nv_biais = biais - lr*erreur_biais
 
+        return gradient, nv_poids, nv_biais
 
+    def backward(self, erreur,lr):
+        #entreée de la dernière couche = dernière activation srtockée
+        entree_finale = self.cache['activations_dense'][-1]
+        grad_W = np.outer(entree_finale,erreur)
+        grad_b = erreur
 
+        #on calcule l'erreur qu'on va renvoyer à la couche d'avant
+        erreur_courante = np.dot(erreur,self.W_final.T)
 
+        self.W_final -= lr*grad_W
+        self.b_final -= lr*grad_b
+        #on parcourt les couches en partant de la fin
+        for i in reversed(range(len(self.poids_dense))):
+            W, b = self.poids_dense[i]
+            entree_couche = self.cache['activations_dense'][i]
+            sortie_couche = self.cache['activations_dense'][i + 1]
+            erreur_courante[sortie_couche <= 0] = 0 #dérivée fonction ReLu
 
+            #on calcule le gradient
+            grad_W = np.outer(entree_couche, erreur_courante)
+            grad_b = erreur_courante
+            erreur_courante = np.dot(erreur_courante, W.T)
 
+            #on met à jour les poids
+            new_W = W - lr * grad_W
+            new_b = b - lr * grad_b
+            self.poids_dense[i] = (new_W, new_b)
 
+        shape_originale = self.cache['avant_flatten'].shape
+        gradient_image = erreur_courante.reshape(shape_originale)
 
-
-
-
-
-
-
+        return gradient_image
 
 def main():
     """
