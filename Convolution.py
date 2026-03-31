@@ -1,19 +1,42 @@
 import numpy as np
 
 class Convolution():
-    def __init__(self,nb_filtres,pas,padding,nb_convolution,kernelsize,pool_size, nb_pooling,image):
+    def __init__(self, nb_filtres, pas, padding, nb_convolution, kernelsize, pool_size, nb_pooling, image_shape, nb_classes, couches_denses):
 
         self.nb_filtres = nb_filtres
         self.pas = pas
         self.type_padding = padding
         self.nb_couches_convolution = nb_convolution
         self.taille_noyau = kernelsize
-        self.nb_couches_pooling = nb_pooling
-        self.image = image
         self.pool_size = pool_size
+        self.image_shape = image_shape
+        self.nb_classes = nb_classes
 
-        self.filtres = np.random.randn(nb_filtres, kernelsize, kernelsize) #paquet de filtres aléatoires pour eviter que le réseau oublie ce qu'il apprend à chq fois
-        pass
+        nb_canaux_init = image_shape[0] if len(image_shape) == 3 else 1
+        self.filtres = np.random.randn(nb_filtres, nb_canaux_init, kernelsize, kernelsize) * 0.1
+
+        # calcul auto de la taille après les convolutions pour le Flatten
+        self.taille_flat = self._calculer_taille_aplatie(image_shape)
+
+        # Création dynamique des couches Denses
+        self.poids_dense = []  # On va stocker des tuples (W, b)
+
+        # La première couche dense part de la taille "flat"
+        taille_precedente = self.taille_flat
+
+        # On boucle sur la liste fournie (ex: [128, 64])
+        for nb_neurones in couches_denses:
+            W = np.random.randn(taille_precedente, nb_neurones) * 0.1
+            b = np.zeros(nb_neurones)
+            self.poids_dense.append((W, b))
+            taille_precedente = nb_neurones  # La sortie devient l'entrée de la suivante
+
+        # Dernière couche : on connecte au nombre de classes (ex: 10)
+        self.W_final = np.random.randn(taille_precedente, nb_classes) * 0.1
+        self.b_final = np.zeros(nb_classes)
+
+
+
 
     def convolution(self, padding, stride, nb_filtres, kernelsize, image, biais):
         """
@@ -29,7 +52,7 @@ class Convolution():
         if image.ndim == 3:
             image = image[0]  # prendre 1er canal si c'est du 3d
 
-        # on ajoute les cases autour de l'image
+        # on ajoute les cases autour de l'image (padding)
         if padding > 0:
             image_ajout_pads = np.pad(image, ((padding, padding), (padding, padding)), mode='constant')
         else:
@@ -127,19 +150,25 @@ class Convolution():
 
 
 
-    def forward(self, image_entree, biais):
+    def forward(self, image_entree, biais, finale=False):
         """ Réalise la passe en avant (Forward Pass). Image traverse  la convolution, l'activation ReLU
         et enfin le pooling pour extraire les caractéristiques reconues pas le CNN.
 
     params:
         image_entree (np.array): Matrice 2D (H, L) représentant l'image brute.
         biais (float): Valeur ajoutée après la convolution pour décaler l'activation.
+        finale: Si True, applique Softmax à la fin, sinon ReLU.
 
     Returns:
         np.array: L'image / feature map transformée et réduite
     """
+
+        img= np.array(image_entree)
+        if img.ndim == 2: #si elle est 2d
+            img = img[np.newaxis, :, :]
+
         # convolution
-        conv_out = self.convolution(padding=self.type_padding, stride=self.pas, nb_filtres=self.nb_filtres,kernelsize=self.taille_noyau,image=image_entree,biais=biais)
+        conv_out = self.convolution(padding=self.type_padding, stride=self.pas, nb_filtres=self.nb_filtres,kernelsize=self.taille_noyau,image=img,biais=biais)
 
         #activation (ReLU pour les couches caches)
         activation_out = self.activation(conv_out, type_fonction="ReLu")
@@ -147,7 +176,27 @@ class Convolution():
         # pooling
         pooling_out = self.pooling(stride=self.pas,pool_size=self.pool_size,image=activation_out,type_pooling="Max")
 
+        if finale: #pour la dernière couche
+            return self.activation(pooling_out, type_fonction="Softmax")
+
         return pooling_out
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def main():
     """
