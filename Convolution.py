@@ -213,6 +213,7 @@ class Convolution():
             #on calcule le gradient
             grad_W = np.outer(entree_couche, erreur_courante)
             grad_b = erreur_courante
+            #calcul erreur pour la couche encore avant
             erreur_courante = np.dot(erreur_courante, W.T)
 
             #on met à jour les poids
