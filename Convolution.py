@@ -13,7 +13,8 @@ class Convolution():
         self.nb_classes = nb_classes
 
         nb_canaux_init = image_shape[0] if len(image_shape) == 3 else 1
-        self.filtres = np.random.randn(nb_filtres, nb_canaux_init, kernelsize, kernelsize) * 0.1
+        n_in_conv = nb_canaux_init * kernelsize * kernelsize
+        self.filtres = np.random.randn(nb_filtres, nb_canaux_init, kernelsize, kernelsize) * np.sqrt(2.0 / n_in_conv)
 
         # calcul auto de la taille après les convolutions pour le Flatten
         self.taille_flat = self._calculer_taille_aplatie(image_shape)
@@ -26,14 +27,33 @@ class Convolution():
 
         # On boucle sur la liste fournie (ex: [128, 64])
         for nb_neurones in couches_denses:
-            W = np.random.randn(taille_precedente, nb_neurones) * 0.1
+            W = np.random.randn(taille_precedente, nb_neurones) * np.sqrt(2.0 / taille_precedente) #poids des filtres
             b = np.zeros(nb_neurones)
             self.poids_dense.append((W, b))
-            taille_precedente = nb_neurones  # La sortie devient l'entrée de la suivante
+            taille_precedente = nb_neurones
 
         # Dernière couche : on connecte au nombre de classes (ex: 10)
-        self.W_final = np.random.randn(taille_precedente, nb_classes) * 0.1
+        self.W_final = np.random.randn(taille_precedente, nb_classes) * np.sqrt(2.0 / taille_precedente)
         self.b_final = np.zeros(nb_classes)
+
+    def _calculer_taille_aplatie(self, shape):
+        """ Calcule la dimension du vecteur après toutes les étapes de convolution et de pooling.
+            Cette valeur est indispensable pour définir la taille de la première couche Dense (poids W1).
+
+            Params: shape (tuple): Format de l'image d'entrée (Canaux, Hauteur, Largeur).
+
+            Returns: int: Le nombre total d'éléments (neurones) une fois le volume aplati.
+                        Calculé par : Nb_Filtres * Hauteur_finale * Largeur_finale.
+            """
+        c, h, l = shape
+        for _ in range(self.nb_couches_convolution):
+            # Simule Conv
+            h = (h + 2 * self.type_padding - self.taille_noyau) // self.pas + 1
+            l = (l + 2 * self.type_padding - self.taille_noyau) // self.pas + 1
+            # Simule Pool
+            h = (h - self.pool_size) // self.pas + 1
+            l = (l - self.pool_size) // self.pas + 1
+        return self.nb_filtres * h * l
 
 
 
@@ -47,27 +67,21 @@ class Convolution():
                 :param kernelsize: taille du noyau
                 :return: un nouvelle image de taille réduite ou non
                 """
-
-        #géstion de l'image d'entree: 2d : (H, L) vs 3d : (C, H, L)
-        if image.ndim == 3:
-            image = image[0]  # prendre 1er canal si c'est du 3d
-
+        nb_canal, image_h_brute, image_l_brute = image.shape
         # on ajoute les cases autour de l'image (padding)
         if padding > 0:
-            image_ajout_pads = np.pad(image, ((padding, padding), (padding, padding)), mode='constant')
+            image_ajout_pads = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
         else:
             image_ajout_pads = image
 
         # on récupère les dimensions de l'images avec les cases en plus
-        image_h, image_l = image_ajout_pads.shape
+        image_h, image_l = image_ajout_pads.shape[1], image_ajout_pads.shape[2]
 
         # on calcule la taille de l'image de sortie
         sortie_h = (image_h - kernelsize) // stride + 1
         sortie_l = (image_l - kernelsize) // stride + 1
 
         # on initialise la matrice de sortie avec les biais
-        # sortie = np.full((sortie_h, sortie_l), biais)
-        #la boucle tourne sur nb_filtres donc la matrice de sortie doit avoir 3 dim
         sortie = np.full((nb_filtres, sortie_h, sortie_l), biais) #je me suis permis de corriger car j'en avais besoin pour la forward
 
         for f in range(nb_filtres):
@@ -152,8 +166,10 @@ class Convolution():
 
     def forward(self, image_entree, biais):  #x est une var temporaire, représente l'état de doonés à chq etape de transformation
         #boucle
-        x = np.array(image_entree) #im brute
-        if x.ndim == 2: x = x[np.newaxis, :, :]
+        x = np.array(image_entree, dtype = float) #im brute
+        # NORMALISATION : On passe de [0, 255] à [0, 1]
+        x = x / 255.0
+        if x.ndim == 2: x = x[np.newaxis, :, :] #newaxis crée une dim vide
 
         for i in range(self.nb_couches_convolution):
             x = self.convolution(self.type_padding, self.pas, self.nb_filtres, self.taille_noyau, x, biais) #x devient un volume de caractéristiques (Feature Map)
@@ -163,12 +179,15 @@ class Convolution():
         #applatissement
         x = x.flatten() #apres la boucle, notre image est ransformée en vecteur
 
+        # fully connected layers
+        """Analogie : Imagine que chaque nombre dans x est un indice (ex: "il y a un rond", "il y a une barre verticale"). 
+        Les poids W disent au réseau : "Si tu vois un rond ET une barre, c'est probablement un 9"."""
         for W, b in self.poids_dense:
-            x = np.dot(x, W) + b #x devient un vecteur de "scores"
+            x = np.dot(x, W) + b #x devient un vecteur de "scores" (.dot = produit matriciel entre les charac apres convolution et multipliés par W)
             x = self.activation(x, type_fonction="ReLu")  # Activation entre chaque couche
 
-        #couche de sortie
-        score_final = np.dot(x, self.W_final) + self.b_final #x est un veteur de la taille de nos classes (ex si on a dix animaux), il represente maintenant une proba que l'image apartienne à une catégorie
+        #couche de sortie (On multiplie les indices restants par ces poids finaux)
+        score_final = np.dot(x, self.W_final) + self.b_final #x est un veteur de la taille de nos classes (ex si on a dix animaux), il represente maintenant une "proba" que l'image apartienne à une catégorie
         return self.activation(score_final, type_fonction="Softmax")
 
 
