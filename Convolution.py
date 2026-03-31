@@ -150,36 +150,26 @@ class Convolution():
 
 
 
-    def forward(self, image_entree, biais, finale=False):
-        """ Réalise la passe en avant (Forward Pass). Image traverse  la convolution, l'activation ReLU
-        et enfin le pooling pour extraire les caractéristiques reconues pas le CNN.
+    def forward(self, image_entree, biais):  #x est une var temporaire, représente l'état de doonés à chq etape de transformation
+        #boucle
+        x = np.array(image_entree) #im brute
+        if x.ndim == 2: x = x[np.newaxis, :, :]
 
-    params:
-        image_entree (np.array): Matrice 2D (H, L) représentant l'image brute.
-        biais (float): Valeur ajoutée après la convolution pour décaler l'activation.
-        finale: Si True, applique Softmax à la fin, sinon ReLU.
+        for i in range(self.nb_couches_convolution):
+            x = self.convolution(self.type_padding, self.pas, self.nb_filtres, self.taille_noyau, x, biais) #x devient un volume de caractéristiques (Feature Map)
+            x = self.activation(x, type_fonction="ReLu") #x est nettoyé (les négatifs deviennent 0)
+            x = self.pooling(self.pas, self.pool_size, x, type_pooling="Max") #x est réduit
 
-    Returns:
-        np.array: L'image / feature map transformée et réduite
-    """
+        #applatissement
+        x = x.flatten() #apres la boucle, notre image est ransformée en vecteur
 
-        img= np.array(image_entree)
-        if img.ndim == 2: #si elle est 2d
-            img = img[np.newaxis, :, :]
+        for W, b in self.poids_dense:
+            x = np.dot(x, W) + b #x devient un vecteur de "scores"
+            x = self.activation(x, type_fonction="ReLu")  # Activation entre chaque couche
 
-        # convolution
-        conv_out = self.convolution(padding=self.type_padding, stride=self.pas, nb_filtres=self.nb_filtres,kernelsize=self.taille_noyau,image=img,biais=biais)
-
-        #activation (ReLU pour les couches caches)
-        activation_out = self.activation(conv_out, type_fonction="ReLu")
-
-        # pooling
-        pooling_out = self.pooling(stride=self.pas,pool_size=self.pool_size,image=activation_out,type_pooling="Max")
-
-        if finale: #pour la dernière couche
-            return self.activation(pooling_out, type_fonction="Softmax")
-
-        return pooling_out
+        #couche de sortie
+        score_final = np.dot(x, self.W_final) + self.b_final #x est un veteur de la taille de nos classes (ex si on a dix animaux), il represente maintenant une proba que l'image apartienne à une catégorie
+        return self.activation(score_final, type_fonction="Softmax")
 
 
 
