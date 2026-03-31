@@ -196,20 +196,6 @@ class Convolution():
         self.cache['z_final'] = score_final
         return self.activation(score_final, type_fonction="Softmax")
 
-    def backward_dense(self,erreur,flatten,poids,biais,lr):
-        #calcul du gradient par rapport aux poids (np.outer : calcule le produit de 2 vecteurs)
-        erreur_poids = np.outer(flatten,erreur)
-
-        #calcul du gradient par rapport aux biais
-        erreur_biais = erreur
-
-        #calcul du gradient
-        gradient = np.dot(erreur,poids.T)
-        nv_poids = poids - lr*erreur_poids
-        nv_biais = biais - lr*erreur_biais
-
-        return gradient, nv_poids, nv_biais
-
     def backward(self, erreur,lr):
         #entreée de la dernière couche = dernière activation srtockée
         entree_finale = self.cache['activations_dense'][-1]
