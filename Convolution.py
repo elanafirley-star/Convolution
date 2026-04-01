@@ -38,11 +38,12 @@ def charger_animaux(path, taille=(64, 64), max_images_par_classe=50):
             chemin_img = os.path.join(dossier_classe, fichier)
 
             # Lecture
-            img = cv2.imread(chemin_img, cv2.IMREAD_GRAYSCALE)
+            img = cv2.imread(chemin_img, cv2.IMREAD_COLOR)
 
             if img is not None:
                 # Redimensionnement (Obligatoire pour le CNN)
                 img = cv2.resize(img, taille)
+                img = img.transpose(2,0,1) #on déplace k'index 2 en position pour avoir (3,64,64) au lieu de (64,64,3)
 
                 # Conversion en float32 pour éviter les erreurs de calcul plus tard
                 images.append(img.astype(np.float32))
@@ -60,6 +61,18 @@ if images is not None:
     print(f"Nombre total d'images : {len(images)}")
     print(f"Format d'une image : {images[0].shape}")
     print(f"Classes trouvées : {noms_classes}")
+
+def melanger_images(images,labels,ratio= 0.8):#80% entrainement, 20%test
+    indices = np.arange(len(images))
+    np.random.shuffle(indices)
+    images = images[indices]
+    labels = labels[indices]
+
+    limite = int(len(images)*ratio)
+    x_train,x_test = images[:limite],images[limite:]
+    y_train,y_test = labels[:limite],labels[limite:]
+
+    return x_train,y_train,x_test,y_test
 
 class Convolution():
     def __init__(self, nb_filtres, pas, padding, nb_convolution, kernelsize, pool_size, nb_pooling, image_shape, nb_classes, couches_denses):
@@ -244,13 +257,13 @@ class Convolution():
         #applatissement
         x_flat = x.flatten() #apres la boucle, notre image est ransformée en vecteur
         self.cache['activation_dense'] = [x_flat] #on stocke l'entrée du block dense
-        x = x.flat
+        x = x_flat
         self.cache['z_dense'] = [] # z= W*x + b
         for W, b in self.poids_dense:
             x = np.dot(x, W) + b #x devient un vecteur de "scores"
             self.cache['z_dense'].append(x) #on stocke le score avant activation
             x = self.activation(x, type_fonction="ReLu")  # Activation entre chaque couche
-            self.cache['activations_dense'].append(x) #on stocke le score activé
+            self.cache['activation_dense'].append(x) #on stocke le score activé
 
         #couche de sortie
         score_final = np.dot(x, self.W_final) + self.b_final #x est un veteur de la taille de nos classes (ex si on a dix animaux), il represente maintenant une proba que l'image apartienne à une catégorie
@@ -259,8 +272,8 @@ class Convolution():
 
     def backward(self, erreur,lr):
         #entreée de la dernière couche = dernière activation srtockée
-        entree_finale = self.cache['activations_dense'][-1]
-        grad_W = np.outer(entree_finale,erreur)
+        entree_finale = self.cache['activation_dense'][-1]
+        grad_W = np.outer(entree_finale,erreur) #np.outer = produit entre 2 vecteurs
         grad_b = erreur
 
         #on calcule l'erreur qu'on va renvoyer à la couche d'avant
@@ -271,8 +284,8 @@ class Convolution():
         #on parcourt les couches en partant de la fin
         for i in reversed(range(len(self.poids_dense))):
             W, b = self.poids_dense[i]
-            entree_couche = self.cache['activations_dense'][i]
-            sortie_couche = self.cache['activations_dense'][i + 1]
+            entree_couche = self.cache['activation_dense'][i] #ce qui est entré dans la couche
+            sortie_couche = self.cache['activation_dense'][i + 1] #ce qui est sorti (après activation)
             erreur_courante[sortie_couche <= 0] = 0 #dérivée fonction ReLu
 
             #on calcule le gradient
@@ -286,23 +299,48 @@ class Convolution():
             new_b = b - lr * grad_b
             self.poids_dense[i] = (new_W, new_b)
 
-        shape_originale = self.cache['avant_flatten'].shape
-        gradient_image = erreur_courante.reshape(shape_originale)
+        #shape_originale = self.cache['avant_flatten'].shape
+        #gradient_image = erreur_courante.reshape(shape_originale)
 
-        return gradient_image
+       # return gradient_image
 
 def main():
-    """
-    Définition des paramètres
-    Rentrer les données d'entraînement
-    Entraînement :
-     - Forward
-     - Calcul de l'errreur
-     - Backward
-     - Recalcul des poids
-    Sauvegarde du modèle
-    """
+    animal_vers_indice = {nom: i for i, nom in enumerate(noms_classes)}
+    Reseau = Convolution(nb_filtres=16, pas=1,padding=1,
+                         nb_convolution=1,kernelsize=3, pool_size=2,
+                         nb_pooling=1, image_shape=(3, 64,64),
+                         nb_classes=10,couches_denses=[128])
+    #x = images, y = labels
+    x_train,y_train,x_test,y_test = melanger_images(images,labels)
+
+
+    #Phase d'entrainement
+    for i in range(len(x_train)) :
+        img = x_train[i]
+        vrai_label = noms_classes[y_train[i]]
+        vecteur_vrai_label = np.zeros(10) #vecteur de 10 zéros
+        vecteur_vrai_label[animal_vers_indice[vrai_label]] =1.0 #on met un 1 à la classe correspondante
+
+        resultat = Reseau.forward(img,1)
+        indice_resultat = np.argmax(resultat)
+        prediction = noms_classes[indice_resultat]
+        erreur = resultat - vecteur_vrai_label
+
+        Reseau.backward(erreur,lr=0.01)
+    print(f"Entraînement terminé sur {len(x_train)} images. ")
+
+    #Phase de test
+    bonnes_predictions = 0
+    for i in range(len(x_test)):
+        img = x_test[i]
+        vrai_label = noms_classes[y_test[i]]
+        resultat = Reseau.forward(img, 1)
+        indice_resultat = np.argmax(resultat)
+        prediction = noms_classes[indice_resultat]
+        if prediction == vrai_label :
+            bonnes_predictions+=1
+    taux_reussite = (bonnes_predictions/len(x_test)) *100
+    print(f"Le réseaux sait reconnaître les animaux à {taux_reussite}%")
 
 if __name__ == "__main__":
     main()
-
