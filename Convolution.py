@@ -13,7 +13,7 @@ path_final = os.path.join(path_brut, "raw-img")
 # Note : Si le print de classes affiche une liste vide après,
 # vérifie si le dossier s'appelle bien 'raw-img' ou s'il n'y en a pas.
 
-def charger_animaux(path, taille=(64, 64), max_images_par_classe=50):
+def charger_animaux(path, max_images_par_classe ,taille=(64, 64)):
     images = []
     labels = []
 
@@ -54,7 +54,7 @@ def charger_animaux(path, taille=(64, 64), max_images_par_classe=50):
 
 
 # --- TEST DU CHARGEMENT ---
-images, labels, noms_classes = charger_animaux(path_final, taille=(64, 64), max_images_par_classe=20)
+images, labels, noms_classes = charger_animaux(path_final, taille=(64, 64), max_images_par_classe=50)
 
 if images is not None:
     print(f"\nChargement terminé !")
@@ -74,6 +74,17 @@ def melanger_images(images,labels,ratio= 0.8):#80% entrainement, 20%test
 
     return x_train,y_train,x_test,y_test
 
+
+
+
+
+
+
+
+
+
+
+
 class Convolution():
     def __init__(self, nb_filtres, pas, padding, nb_convolution, kernelsize, pool_size, nb_pooling, image_shape, nb_classes, couches_denses):
 
@@ -88,7 +99,12 @@ class Convolution():
 
         nb_canaux_init = image_shape[0] if len(image_shape) == 3 else 1
         n_in_conv = nb_canaux_init * kernelsize * kernelsize
-        self.filtres = np.random.randn(nb_filtres, nb_canaux_init, kernelsize, kernelsize) * np.sqrt(2.0 / n_in_conv)
+        self.liste_filtres = []
+        nb_canaux_courant = nb_canaux_init
+        for _ in range(nb_convolution):
+            f = np.random.randn(nb_filtres, nb_canaux_courant, kernelsize, kernelsize) * np.sqrt(2.0 / (nb_canaux_courant * kernelsize ** 2))
+            self.liste_filtres.append(f)
+            nb_canaux_courant = nb_filtres # La sortie d'une couche devient l'entrée de la suivante
 
         # calcul auto de la taille après les convolutions pour le Flatten
         self.taille_flat = self._calculer_taille_aplatie(image_shape)
@@ -129,50 +145,35 @@ class Convolution():
             l = (l - self.pool_size) // self.pas + 1
         return self.nb_filtres * h * l
 
-
-
-
-    def convolution(self, padding, stride, nb_filtres, kernelsize, image, biais):
-        """
-                Applique un filtre sur l'image
-                :param padding: nb de pixels ajoutés sur le bord de l'image (soit 0 ou copie du pixel voisin)
-                :param stride: de combien on décale
-                :param nb_filtres:
-                :param kernelsize: taille du noyau
-                :return: un nouvelle image de taille réduite ou non
-                """
+    def convolution(self, padding, stride, nb_filtres, kernelsize, image, biais, filtre=None):
         nb_canal, image_h_brute, image_l_brute = image.shape
-        # on ajoute les cases autour de l'image (padding)
+
+        filtres_a_utiliser = filtre
+
         if padding > 0:
             image_ajout_pads = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode='constant')
         else:
             image_ajout_pads = image
 
-        # on récupère les dimensions de l'images avec les cases en plus
         image_h, image_l = image_ajout_pads.shape[1], image_ajout_pads.shape[2]
 
-        # on calcule la taille de l'image de sortie
         sortie_h = (image_h - kernelsize) // stride + 1
         sortie_l = (image_l - kernelsize) // stride + 1
 
-        # on initialise la matrice de sortie avec les biais
-        # sortie = np.full((sortie_h, sortie_l), biais)
-        #la boucle tourne sur nb_filtres donc la matrice de sortie doit avoir 3 dim
-        sortie = np.full((nb_filtres, sortie_h, sortie_l), biais) #je me suis permis de corriger car j'en avais besoin pour la forward
+        sortie = np.full((nb_filtres, sortie_h, sortie_l), biais)
 
         for f in range(nb_filtres):
-            filtre_actuel = self.filtres[f]
+            # ICI : On utilise filtres_a_utiliser au lieu de self.filtres
+            filtre_actuel = filtres_a_utiliser[f]
 
             for y in range(sortie_h):
                 for x in range(sortie_l):
-                    #on délimite la zone qu'on va regarder
                     y_start = y * stride
                     y_end = y_start + kernelsize
                     x_start = x * stride
                     x_end = x_start + kernelsize
 
-                    #on en fait une matrice à part entière
-                    fenetre = image_ajout_pads[:, y_start:y_end, x_start : x_end]
+                    fenetre = image_ajout_pads[:, y_start:y_end, x_start: x_end]
                     sortie[f, y, x] += np.sum(fenetre * filtre_actuel)
 
         return sortie
@@ -249,9 +250,9 @@ class Convolution():
         if x.ndim == 2: x = x[np.newaxis, :, :] #newaxis crée une dim vide
 
         for i in range(self.nb_couches_convolution):
-            x = self.convolution(self.type_padding, self.pas, self.nb_filtres, self.taille_noyau, x, biais) #x devient un volume de caractéristiques (Feature Map)
-            x = self.activation(x, type_fonction="ReLu") #x est nettoyé (les négatifs deviennent 0)
-            x = self.pooling(self.pas, self.pool_size, x, type_pooling="Max") #x est réduit
+            x = self.convolution(self.type_padding, self.pas, self.nb_filtres, self.taille_noyau, x, biais, filtre=self.liste_filtres[i])
+            x = self.activation(x, type_fonction="ReLu")
+            x = self.pooling(self.pas, self.pool_size, x, type_pooling="Max")
 
         self.cache['avant_flatten'] = x
         #applatissement
@@ -326,7 +327,7 @@ def main():
         prediction = noms_classes[indice_resultat]
         erreur = resultat - vecteur_vrai_label
 
-        Reseau.backward(erreur,lr=0.01)
+        Reseau.backward(erreur,lr=0.0001)
     print(f"Entraînement terminé sur {len(x_train)} images. ")
 
     #Phase de test
