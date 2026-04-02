@@ -54,7 +54,7 @@ def charger_animaux(path, max_images_par_classe ,taille=(64, 64)):
 
 
 # --- TEST DU CHARGEMENT ---
-images, labels, noms_classes = charger_animaux(path_final, taille=(64, 64), max_images_par_classe=50)
+images, labels, noms_classes = charger_animaux(path_final, taille=(64, 64), max_images_par_classe=10)
 
 if images is not None:
     print(f"\nChargement terminé !")
@@ -250,8 +250,10 @@ class Convolution():
         if x.ndim == 2: x = x[np.newaxis, :, :] #newaxis crée une dim vide
 
         for i in range(self.nb_couches_convolution):
+            self.cache[f'entree_conv_{i}'] = x  # On stocke l'entrée
             x = self.convolution(self.type_padding, self.pas, self.nb_filtres, self.taille_noyau, x, biais, filtre=self.liste_filtres[i])
             x = self.activation(x, type_fonction="ReLu")
+            self.cache[f'avant_pool_{i}'] = x  # On stocke après activation
             x = self.pooling(self.pas, self.pool_size, x, type_pooling="Max")
 
         self.cache['avant_flatten'] = x
@@ -271,8 +273,11 @@ class Convolution():
         self.cache['z_final'] = score_final
         return self.activation(score_final, type_fonction="Softmax")
 
+
+
+
     def backward(self, erreur,lr):
-        #entreée de la dernière couche = dernière activation srtockée
+        #Backward des couches densses
         entree_finale = self.cache['activation_dense'][-1]
         grad_W = np.outer(entree_finale,erreur) #np.outer = produit entre 2 vecteurs
         grad_b = erreur
@@ -282,6 +287,7 @@ class Convolution():
 
         self.W_final -= lr*grad_W
         self.b_final -= lr*grad_b
+
         #on parcourt les couches en partant de la fin
         for i in reversed(range(len(self.poids_dense))):
             W, b = self.poids_dense[i]
@@ -300,8 +306,13 @@ class Convolution():
             new_b = b - lr * grad_b
             self.poids_dense[i] = (new_W, new_b)
 
-        #shape_originale = self.cache['avant_flatten'].shape
-        #gradient_image = erreur_courante.reshape(shape_originale)
+        shape_originale = self.cache['avant_flatten'].shape
+        gradient_image = erreur_courante.reshape(shape_originale)
+
+        #Backward pooling+convolution
+        for i in reversed(range(len(self.nb_couches_convolution))):
+            grad_avant_pool = np.zeros_like(self.cache[f'avant_pool_{i}'])
+
 
        # return gradient_image
 
@@ -314,20 +325,41 @@ def main():
     #x = images, y = labels
     x_train,y_train,x_test,y_test = melanger_images(images,labels)
 
+    # parametres de l'entrainement
+    nb_epoques = 20  # On repasse 20 fois sur les images
+    lr = 0.01
 
-    #Phase d'entrainement
-    for i in range(len(x_train)) :
-        img = x_train[i]
-        vrai_label = noms_classes[y_train[i]]
-        vecteur_vrai_label = np.zeros(10) #vecteur de 10 zéros
-        vecteur_vrai_label[animal_vers_indice[vrai_label]] =1.0 #on met un 1 à la classe correspondante
+    print(f"Début de l'entraînement sur {len(x_train)} images...")
 
-        resultat = Reseau.forward(img,1)
-        indice_resultat = np.argmax(resultat)
-        prediction = noms_classes[indice_resultat]
-        erreur = resultat - vecteur_vrai_label
+    # Phase entrainement
+    for epoque in range(nb_epoques):
+        perte_totale = 0
+        bonnes_reponses_train = 0
 
-        Reseau.backward(erreur,lr=0.0001)
+        # Mélange
+        indices = np.arange(len(x_train))
+        np.random.shuffle(indices)
+        x_train, y_train = x_train[indices], y_train[indices]
+
+        for i in range(len(x_train)):
+            img = x_train[i]
+            vrai_idx = y_train[i]
+            vecteur_vrai_label = np.zeros(10)
+            vecteur_vrai_label[vrai_idx] = 1.0
+
+            resultat = Reseau.forward(img, 0.01)
+            erreur = resultat - vecteur_vrai_label
+            perte_totale += np.sum(erreur ** 2)
+
+            # On vérifie si la prédiction est correcte
+            if np.argmax(resultat) == vrai_idx:
+                bonnes_reponses_train += 1
+
+            Reseau.backward(erreur, lr)
+
+        perte_moyenne = perte_totale / len(x_train)
+        precision_train = (bonnes_reponses_train / len(x_train)) * 100
+        print(f"Époque {epoque + 1}/{nb_epoques} | Perte: {perte_moyenne:.4f} | Précision Train: {precision_train:.2f}%")
     print(f"Entraînement terminé sur {len(x_train)} images. ")
 
     #Phase de test
@@ -335,7 +367,7 @@ def main():
     for i in range(len(x_test)):
         img = x_test[i]
         vrai_label = noms_classes[y_test[i]]
-        resultat = Reseau.forward(img, 1)
+        resultat = Reseau.forward(img, 0.01)
         indice_resultat = np.argmax(resultat)
         prediction = noms_classes[indice_resultat]
         if prediction == vrai_label :
