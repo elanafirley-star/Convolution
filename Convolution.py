@@ -3,10 +3,10 @@ import kagglehub
 import os
 import cv2
 
-# 1. Téléchargement
+# Téléchargement
 path_brut = kagglehub.dataset_download("alessiocorrado99/animals10")
 
-# 2. Correction du chemin (Le dataset Kaggle contient un sous-dossier 'raw-img')
+# correction du chemin (Le dataset Kaggle contient un sous-dossier 'raw-img')
 path_final = os.path.join(path_brut, "raw-img")
 
 
